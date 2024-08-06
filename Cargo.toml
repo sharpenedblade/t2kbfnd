@@ -1,0 +1,10 @@
+[package]
+name = "t2kbfnd"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Daemon to handle the fn key and touchbar backlight on t2 macs"
+repository = "https://github.com/sharpenedblade/t2kbfnd"
+readme = "README.md"
+
+[dependencies]
