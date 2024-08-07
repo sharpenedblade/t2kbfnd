@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use glob::glob;
 use input_linux::{evdev::EvdevHandle, Event, Key};
 use std::{
-    fs::File,
+    fs::{File, OpenOptions},
     io::{Read, Write},
     mem::MaybeUninit,
     time::Instant,
@@ -67,9 +67,14 @@ struct TbBacklight {
 
 impl TbBacklight {
     fn new() -> Result<Self> {
-        let mut fd = File::open("/sys/class/backlight/appletb_backlight/brightness")?;
+        let mut read_fd = File::open("/sys/class/backlight/appletb_backlight/brightness")?;
         let mut buf = String::new();
-        fd.read_to_string(&mut buf)?;
+        read_fd.read_to_string(&mut buf)?;
+
+        let fd = OpenOptions::new()
+            .write(true)
+            .read(false)
+            .open("/sys/class/backlight/appletb_backlight/brightness")?;
         let state = match buf.trim() {
             "0" => TbBacklightMode::Off,
             "1" => TbBacklightMode::Dim,
