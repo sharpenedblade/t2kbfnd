@@ -1,12 +1,21 @@
 use anyhow::{anyhow, Context, Result};
+use clap::Parser;
 use glob::glob;
 use input_linux::{evdev::EvdevHandle, Event, Key};
+use log::{info, trace};
+use simplelog::TermLogger;
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
     mem::MaybeUninit,
     time::Instant,
 };
+
+#[derive(Parser)]
+struct Args {
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    debug: u8,
+}
 
 const TOUCHBAR_CONTROL_PATH: &str = "/sys/bus/hid/drivers/hid-appletb-kbd/*05AC:8302*";
 const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-kbd";
@@ -27,8 +36,9 @@ impl Touchbar {
     fn new(default_mode: TouchbarMode) -> Result<Self> {
         let mut tb_dir = glob(TOUCHBAR_CONTROL_PATH)?
             .next()
-            .context("Internal Keyboard not found")??;
+            .context("Touchbar not found")??;
         tb_dir.push("mode");
+        info!("Touchbar found: {}", tb_dir.display());
 
         let mut read_fd = File::open(&tb_dir)?;
         let mut buf = String::new();
@@ -87,7 +97,7 @@ impl TbBacklight {
     }
 
     fn set_brightness(&mut self, mode: TbBacklightMode) -> Result<()> {
-        println!("Setting brightness to {}", mode as u32);
+        trace!("Setting brightness to {}", mode as u32);
         self.fd.write_all(format!("{}", mode as u32).as_bytes())?;
         self.state = mode;
         Ok(())
@@ -101,10 +111,26 @@ fn load_config() -> Result<TouchbarMode> {
         "function" => TouchbarMode::Function,
         _ => return Err(anyhow!("Bad config file")),
     };
+    info!("Setting default mode to {:#?}", mode);
     Ok(mode)
 }
 
 fn main() {
+    let args = Args::parse();
+
+    let log_level = match args.debug {
+        0 => simplelog::LevelFilter::Warn,
+        1 => simplelog::LevelFilter::Info,
+        2 => simplelog::LevelFilter::Debug,
+        _ => simplelog::LevelFilter::Trace,
+    };
+    TermLogger::new(
+        log_level,
+        simplelog::Config::default(),
+        simplelog::TerminalMode::Mixed,
+        simplelog::ColorChoice::Auto,
+    );
+
     let default_mode = load_config().unwrap_or(TouchbarMode::Media);
 
     let mut touchbar = Touchbar::new(default_mode).unwrap();
@@ -141,19 +167,15 @@ fn main() {
         }
 
         let inactive_time = last_event_time.elapsed().as_secs();
-        println!("{}", inactive_time);
         if inactive_time >= 60 {
-            println!(">60 sec inactive");
             touchbar_backlight
                 .set_brightness(TbBacklightMode::Off)
                 .unwrap();
         } else if inactive_time >= 30 {
-            println!(">30 sec inactive");
             touchbar_backlight
                 .set_brightness(TbBacklightMode::Dim)
                 .unwrap();
         } else {
-            println!("<30 sec inactive");
             touchbar_backlight
                 .set_brightness(TbBacklightMode::Max)
                 .unwrap();
