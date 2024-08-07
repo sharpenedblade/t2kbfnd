@@ -34,7 +34,7 @@ impl Touchbar {
         let mut buf = String::new();
         fd.read_to_string(&mut buf).unwrap();
 
-        let state = match buf.as_str() {
+        let state = match buf.trim() {
             "1" => TouchbarMode::Function,
             "2" => TouchbarMode::Media,
             _ => return Err(anyhow!("Touchbar state unknown")),
@@ -70,7 +70,7 @@ impl TbBacklight {
         let mut fd = File::open("/sys/class/backlight/appletb_backlight/brightness")?;
         let mut buf = String::new();
         fd.read_to_string(&mut buf)?;
-        let state = match buf.as_str() {
+        let state = match buf.trim() {
             "0" => TbBacklightMode::Off,
             "1" => TbBacklightMode::Dim,
             "2" => TbBacklightMode::Max,
