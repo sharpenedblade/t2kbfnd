@@ -87,6 +87,7 @@ impl TbBacklight {
     }
 
     fn set_brightness(&mut self, mode: TbBacklightMode) -> Result<()> {
+        println!("Setting brightness to {}", mode as u32);
         self.fd.write_all(format!("{}", mode as u32).as_bytes())?;
         self.state = mode;
         Ok(())
@@ -141,14 +142,17 @@ fn main() {
 
         let inactive_time = last_event_time.elapsed().as_secs();
         if inactive_time >= 60 {
+            println!(">60 sec inactive");
             touchbar_backlight
                 .set_brightness(TbBacklightMode::Off)
                 .unwrap();
         } else if inactive_time >= 30 {
+            println!(">30 sec inactive");
             touchbar_backlight
                 .set_brightness(TbBacklightMode::Dim)
                 .unwrap();
         } else {
+            println!("<30 sec inactive");
             touchbar_backlight
                 .set_brightness(TbBacklightMode::Max)
                 .unwrap();
