@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use glob::glob;
 use input_linux::{evdev::EvdevHandle, Event, Key};
 use std::{
@@ -14,6 +14,37 @@ const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*eve
 enum TouchbarMode {
     FUNCTION = 1,
     MEDIA = 2,
+}
+
+struct Touchbar {
+    fd: File,
+    state: TouchbarMode,
+}
+
+impl Touchbar {
+    fn new() -> Result<Self> {
+        let mut tb_dir = glob(TOUCHBAR_CONTROL_PATH)?
+            .next()
+            .context("Internal Keyboard not found")??;
+        tb_dir.push("mode");
+
+        let mut fd = File::open(tb_dir)?;
+        let mut buf = String::new();
+        fd.read_to_string(&mut buf).unwrap();
+
+        let state = match buf.as_str() {
+            "1" => TouchbarMode::FUNCTION,
+            "2" => TouchbarMode::MEDIA,
+            _ => return Err(anyhow!("Touchbar state unknown")),
+        };
+        Ok(Self { fd, state })
+    }
+
+    fn set_mode(&mut self, mode: TouchbarMode) -> Result<()> {
+        self.fd.write_all(format!("{}", mode as u32).as_bytes())?;
+        self.state = mode;
+        Ok(())
+    }
 }
 
 enum TbBacklightMode {
@@ -43,13 +74,11 @@ impl TbBacklight {
 }
 
 fn main() {
-    let mut touchbar_mode_fd = get_touchbar_mode_fd().unwrap();
-    let evdev_handle = get_keyboard_event_fd().unwrap();
-
-    let mut ev_buf = [MaybeUninit::uninit(); 8];
-    let mut touchbar_state = TouchbarMode::MEDIA;
-
+    let mut touchbar = Touchbar::new().unwrap();
     let mut touchbar_backlight = TbBacklight::new().unwrap();
+
+    let evdev_handle = get_keyboard_event_fd().unwrap();
+    let mut ev_buf = [MaybeUninit::uninit(); 8];
 
     loop {
         let events = evdev_handle
@@ -61,27 +90,14 @@ fn main() {
             if let Event::Key(key_event) = event {
                 if let Key::Fn = key_event.key {
                     if key_event.value.is_pressed() {
-                        touchbar_state = TouchbarMode::FUNCTION;
+                        touchbar.set_mode(TouchbarMode::FUNCTION);
                     } else {
-                        touchbar_state = TouchbarMode::MEDIA;
+                        touchbar.set_mode(TouchbarMode::MEDIA);
                     }
-                    write_touchbar_mode(&mut touchbar_mode_fd, touchbar_state);
                 }
             }
         }
     }
-}
-
-fn get_touchbar_mode_fd() -> Result<File> {
-    let mut kb_dir = glob(TOUCHBAR_CONTROL_PATH)?
-        .next()
-        .context("Internal Keyboard not found")??;
-    kb_dir.push("mode");
-    Ok(File::open(kb_dir)?)
-}
-
-fn write_touchbar_mode(fd: &mut File, mode: TouchbarMode) {
-    fd.write_all(format!("{}", mode as u32).as_bytes()).unwrap();
 }
 
 fn get_keyboard_event_fd() -> Result<EvdevHandle<File>> {
