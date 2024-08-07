@@ -141,6 +141,7 @@ fn main() {
         }
 
         let inactive_time = last_event_time.elapsed().as_secs();
+        println!("{}", inactive_time);
         if inactive_time >= 60 {
             println!(">60 sec inactive");
             touchbar_backlight
