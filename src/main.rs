@@ -11,7 +11,7 @@ use std::{
 const TOUCHBAR_CONTROL_PATH: &str = "/sys/bus/hid/drivers/hid-appletb-kbd/*05AC:8302*";
 const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-kbd";
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum TouchbarMode {
     Function = 1,
     Media = 2,
@@ -20,10 +20,11 @@ enum TouchbarMode {
 struct Touchbar {
     fd: File,
     state: TouchbarMode,
+    default_mode: TouchbarMode,
 }
 
 impl Touchbar {
-    fn new() -> Result<Self> {
+    fn new(default_mode: TouchbarMode) -> Result<Self> {
         let mut tb_dir = glob(TOUCHBAR_CONTROL_PATH)?
             .next()
             .context("Internal Keyboard not found")??;
@@ -38,7 +39,11 @@ impl Touchbar {
             "2" => TouchbarMode::Media,
             _ => return Err(anyhow!("Touchbar state unknown")),
         };
-        Ok(Self { fd, state })
+        Ok(Self {
+            default_mode,
+            fd,
+            state,
+        })
     }
 
     fn set_mode(&mut self, mode: TouchbarMode) -> Result<()> {
@@ -81,8 +86,20 @@ impl TbBacklight {
     }
 }
 
+fn load_config() -> Result<TouchbarMode> {
+    let config = std::fs::read_to_string("/etc/t2kbfnd.txt")?;
+    let mode = match config.as_str() {
+        "media" => TouchbarMode::Media,
+        "function" => TouchbarMode::Function,
+        _ => return Err(anyhow!("Bad config file")),
+    };
+    Ok(mode)
+}
+
 fn main() {
-    let mut touchbar = Touchbar::new().unwrap();
+    let default_mode = load_config().unwrap_or(TouchbarMode::Media);
+
+    let mut touchbar = Touchbar::new(default_mode).unwrap();
     let mut touchbar_backlight = TbBacklight::new().unwrap();
 
     let evdev_handle = get_keyboard_event_fd().unwrap();
@@ -99,11 +116,17 @@ fn main() {
         for event in events {
             if let Event::Key(key_event) = event {
                 if key_event.key == Key::Fn {
-                    if key_event.value.is_pressed() {
-                        touchbar.set_mode(TouchbarMode::Function).unwrap();
-                    } else {
-                        touchbar.set_mode(TouchbarMode::Media).unwrap();
-                    }
+                    touchbar
+                        .set_mode(if key_event.value.is_pressed() {
+                            if touchbar.default_mode == TouchbarMode::Media {
+                                TouchbarMode::Function
+                            } else {
+                                TouchbarMode::Media
+                            }
+                        } else {
+                            touchbar.default_mode
+                        })
+                        .unwrap()
                 }
             }
             last_event_time = Instant::now();
