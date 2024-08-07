@@ -13,8 +13,8 @@ const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*eve
 
 #[derive(Debug, Copy, Clone)]
 enum TouchbarMode {
-    FUNCTION = 1,
-    MEDIA = 2,
+    Function = 1,
+    Media = 2,
 }
 
 struct Touchbar {
@@ -34,8 +34,8 @@ impl Touchbar {
         fd.read_to_string(&mut buf).unwrap();
 
         let state = match buf.as_str() {
-            "1" => TouchbarMode::FUNCTION,
-            "2" => TouchbarMode::MEDIA,
+            "1" => TouchbarMode::Function,
+            "2" => TouchbarMode::Media,
             _ => return Err(anyhow!("Touchbar state unknown")),
         };
         Ok(Self { fd, state })
@@ -50,9 +50,9 @@ impl Touchbar {
 
 #[derive(Debug, Copy, Clone)]
 enum TbBacklightMode {
-    OFF = 0,
-    DIM = 1,
-    MAX = 2,
+    Off = 0,
+    Dim = 1,
+    Max = 2,
 }
 
 struct TbBacklight {
@@ -64,12 +64,12 @@ impl TbBacklight {
     fn new() -> Result<Self> {
         let mut fd = File::open("/sys/class/backlight/appletb_backlight/brightness")?;
         let mut buf = String::new();
-        fd.read_to_string(&mut buf).unwrap();
+        fd.read_to_string(&mut buf)?;
         let state = match buf.as_str() {
-            "0" => TbBacklightMode::OFF,
-            "1" => TbBacklightMode::DIM,
-            "2" => TbBacklightMode::MAX,
-            _ => TbBacklightMode::OFF,
+            "0" => TbBacklightMode::Off,
+            "1" => TbBacklightMode::Dim,
+            "2" => TbBacklightMode::Max,
+            _ => return Err(anyhow!("Touchbar backlight state unknown")),
         };
         Ok(Self { state, fd })
     }
@@ -95,14 +95,14 @@ fn main() {
             .read_input_events(&mut ev_buf)
             .unwrap()
             .iter()
-            .map(|e| Event::new(e.clone()).unwrap());
+            .map(|e| Event::new(*e).unwrap());
         for event in events {
             if let Event::Key(key_event) = event {
-                if let Key::Fn = key_event.key {
+                if key_event.key == Key::Fn {
                     if key_event.value.is_pressed() {
-                        touchbar.set_mode(TouchbarMode::FUNCTION).unwrap();
+                        touchbar.set_mode(TouchbarMode::Function).unwrap();
                     } else {
-                        touchbar.set_mode(TouchbarMode::MEDIA).unwrap();
+                        touchbar.set_mode(TouchbarMode::Media).unwrap();
                     }
                 }
             }
@@ -112,15 +112,15 @@ fn main() {
         let inactive_time = last_event_time.elapsed().as_secs();
         if inactive_time >= 60 {
             touchbar_backlight
-                .set_brightness(TbBacklightMode::OFF)
+                .set_brightness(TbBacklightMode::Off)
                 .unwrap();
         } else if inactive_time >= 30 {
             touchbar_backlight
-                .set_brightness(TbBacklightMode::DIM)
+                .set_brightness(TbBacklightMode::Dim)
                 .unwrap();
         } else {
             touchbar_backlight
-                .set_brightness(TbBacklightMode::MAX)
+                .set_brightness(TbBacklightMode::Max)
                 .unwrap();
         }
     }
