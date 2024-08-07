@@ -88,7 +88,7 @@ impl TbBacklight {
 
 fn load_config() -> Result<TouchbarMode> {
     let config = std::fs::read_to_string("/etc/t2kbfnd.txt")?;
-    let mode = match config.as_str() {
+    let mode = match config.trim() {
         "media" => TouchbarMode::Media,
         "function" => TouchbarMode::Function,
         _ => return Err(anyhow!("Bad config file")),
