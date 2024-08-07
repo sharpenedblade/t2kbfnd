@@ -1,7 +1,11 @@
 use anyhow::{Context, Result};
 use glob::glob;
 use input_linux::{evdev::EvdevHandle, Event, Key};
-use std::{fs::File, io::Write, mem::MaybeUninit};
+use std::{
+    fs::File,
+    io::{Read, Write},
+    mem::MaybeUninit,
+};
 
 const TOUCHBAR_CONTROL_PATH: &str = "/sys/bus/hid/drivers/hid-appletb-kbd/*05AC:8302*";
 const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-kbd";
@@ -54,7 +58,16 @@ fn main() {
             .iter()
             .map(|e| Event::new(e.clone()).unwrap());
         for event in events {
-            handle_fn_key(&event, &mut touchbar_state, &mut touchbar_mode_fd);
+            if let Event::Key(key_event) = event {
+                if let Key::Fn = key_event.key {
+                    if key_event.value.is_pressed() {
+                        touchbar_state = TouchbarMode::FUNCTION;
+                    } else {
+                        touchbar_state = TouchbarMode::MEDIA;
+                    }
+                    write_touchbar_mode(&mut touchbar_mode_fd, touchbar_state);
+                }
+            }
         }
     }
 }
@@ -65,19 +78,6 @@ fn get_touchbar_mode_fd() -> Result<File> {
         .context("Internal Keyboard not found")??;
     kb_dir.push("mode");
     Ok(File::open(kb_dir)?)
-}
-
-fn handle_fn_key(event: &Event, touchbar_state: &mut TouchbarMode, toucbar_mode_fd: &mut File) {
-    if let Event::Key(key_event) = event {
-        if let Key::Fn = key_event.key {
-            if key_event.value.is_pressed() {
-                *touchbar_state = TouchbarMode::FUNCTION;
-            } else {
-                *touchbar_state = TouchbarMode::MEDIA;
-            }
-            write_touchbar_mode(toucbar_mode_fd, *touchbar_state);
-        }
-    }
 }
 
 fn write_touchbar_mode(fd: &mut File, mode: TouchbarMode) {
