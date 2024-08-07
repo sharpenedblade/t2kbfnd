@@ -4,7 +4,7 @@ use input_linux::{evdev::EvdevHandle, Event, Key};
 use std::{fs::File, io::Write, mem::MaybeUninit};
 
 const TOUCHBAR_CONTROL_PATH: &str = "/sys/bus/hid/drivers/hid-appletb-kbd/*05AC:8302*";
-const KEYBOARD_EVENT_PATH: &str = "/dev/inpsust/by-id/*Apple_Internal_Keyboard*event-kbd";
+const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-kbd";
 
 #[derive(Debug, Copy, Clone)]
 enum TouchbarMode {
