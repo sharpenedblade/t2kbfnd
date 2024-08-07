@@ -12,12 +12,40 @@ enum TouchbarMode {
     MEDIA = 2,
 }
 
+enum TbBacklightMode {
+    OFF = 0,
+    DIM = 1,
+    MAX = 2,
+}
+
+struct TbBacklight {
+    pub state: TbBacklightMode,
+    fd: File,
+}
+
+impl TbBacklight {
+    fn new() -> Result<Self> {
+        let mut fd = File::open("/sys/class/backlight/appletb_backlight/brightness")?;
+        let mut buf = String::new();
+        fd.read_to_string(&mut buf).unwrap();
+        let state = match buf.as_str() {
+            "0" => TbBacklightMode::OFF,
+            "1" => TbBacklightMode::DIM,
+            "2" => TbBacklightMode::MAX,
+            _ => TbBacklightMode::OFF,
+        };
+        Ok(Self { state, fd })
+    }
+}
+
 fn main() {
     let mut touchbar_mode_fd = get_touchbar_mode_fd().unwrap();
     let evdev_handle = get_keyboard_event_fd().unwrap();
 
     let mut ev_buf = [MaybeUninit::uninit(); 8];
     let mut touchbar_state = TouchbarMode::MEDIA;
+
+    let mut touchbar_backlight = TbBacklight::new().unwrap();
 
     loop {
         let events = evdev_handle
