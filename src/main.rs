@@ -5,6 +5,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     mem::MaybeUninit,
+    time::Instant,
 };
 
 const TOUCHBAR_CONTROL_PATH: &str = "/sys/bus/hid/drivers/hid-appletb-kbd/*05AC:8302*";
@@ -47,6 +48,7 @@ impl Touchbar {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 enum TbBacklightMode {
     OFF = 0,
     DIM = 1,
@@ -71,6 +73,12 @@ impl TbBacklight {
         };
         Ok(Self { state, fd })
     }
+
+    fn set_brightness(&mut self, mode: TbBacklightMode) -> Result<()> {
+        self.fd.write_all(format!("{}", mode as u32).as_bytes())?;
+        self.state = mode;
+        Ok(())
+    }
 }
 
 fn main() {
@@ -79,6 +87,8 @@ fn main() {
 
     let evdev_handle = get_keyboard_event_fd().unwrap();
     let mut ev_buf = [MaybeUninit::uninit(); 8];
+
+    let mut last_event_time = Instant::now();
 
     loop {
         let events = evdev_handle
@@ -90,12 +100,28 @@ fn main() {
             if let Event::Key(key_event) = event {
                 if let Key::Fn = key_event.key {
                     if key_event.value.is_pressed() {
-                        touchbar.set_mode(TouchbarMode::FUNCTION);
+                        touchbar.set_mode(TouchbarMode::FUNCTION).unwrap();
                     } else {
-                        touchbar.set_mode(TouchbarMode::MEDIA);
+                        touchbar.set_mode(TouchbarMode::MEDIA).unwrap();
                     }
                 }
             }
+            last_event_time = Instant::now();
+        }
+
+        let inactive_time = last_event_time.elapsed().as_secs();
+        if inactive_time >= 60 {
+            touchbar_backlight
+                .set_brightness(TbBacklightMode::OFF)
+                .unwrap();
+        } else if inactive_time >= 30 {
+            touchbar_backlight
+                .set_brightness(TbBacklightMode::DIM)
+                .unwrap();
+        } else {
+            touchbar_backlight
+                .set_brightness(TbBacklightMode::MAX)
+                .unwrap();
         }
     }
 }
