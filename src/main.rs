@@ -42,7 +42,7 @@ impl Touchbar {
 
         let mut read_fd = File::open(&tb_dir)?;
         let mut buf = String::new();
-        read_fd.read_to_string(&mut buf).unwrap();
+        read_fd.read_to_string(&mut buf)?;
 
         let fd = OpenOptions::new().write(true).read(false).open(tb_dir)?;
 
@@ -115,7 +115,7 @@ fn load_config() -> Result<TouchbarMode> {
     Ok(mode)
 }
 
-fn main() {
+fn main() -> Result<()> {
     let args = Args::parse();
 
     let log_level = match args.debug {
@@ -133,34 +133,31 @@ fn main() {
 
     let default_mode = load_config().unwrap_or(TouchbarMode::Media);
 
-    let mut touchbar = Touchbar::new(default_mode).unwrap();
-    let mut touchbar_backlight = TbBacklight::new().unwrap();
+    let mut touchbar = Touchbar::new(default_mode)?;
+    let mut touchbar_backlight = TbBacklight::new()?;
 
-    let evdev_handle = get_keyboard_event_fd().unwrap();
+    let evdev_handle = get_keyboard_event_fd()?;
     let mut ev_buf = [MaybeUninit::uninit(); 8];
 
     let mut last_event_time = Instant::now();
 
     loop {
         let events = evdev_handle
-            .read_input_events(&mut ev_buf)
-            .unwrap()
+            .read_input_events(&mut ev_buf)?
             .iter()
             .map(|e| Event::new(*e).unwrap());
         for event in events {
             if let Event::Key(key_event) = event {
                 if key_event.key == Key::Fn {
-                    touchbar
-                        .set_mode(if key_event.value.is_pressed() {
-                            if touchbar.default_mode == TouchbarMode::Media {
-                                TouchbarMode::Function
-                            } else {
-                                TouchbarMode::Media
-                            }
+                    touchbar.set_mode(if key_event.value.is_pressed() {
+                        if touchbar.default_mode == TouchbarMode::Media {
+                            TouchbarMode::Function
                         } else {
-                            touchbar.default_mode
-                        })
-                        .unwrap()
+                            TouchbarMode::Media
+                        }
+                    } else {
+                        touchbar.default_mode
+                    })?
                 }
             }
             last_event_time = Instant::now();
@@ -168,17 +165,11 @@ fn main() {
 
         let inactive_time = last_event_time.elapsed().as_secs();
         if inactive_time >= 60 {
-            touchbar_backlight
-                .set_brightness(TbBacklightMode::Off)
-                .unwrap();
+            touchbar_backlight.set_brightness(TbBacklightMode::Off)?
         } else if inactive_time >= 30 {
-            touchbar_backlight
-                .set_brightness(TbBacklightMode::Dim)
-                .unwrap();
+            touchbar_backlight.set_brightness(TbBacklightMode::Dim)?
         } else {
-            touchbar_backlight
-                .set_brightness(TbBacklightMode::Max)
-                .unwrap();
+            touchbar_backlight.set_brightness(TbBacklightMode::Max)?
         }
     }
 }
