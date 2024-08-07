@@ -30,9 +30,11 @@ impl Touchbar {
             .context("Internal Keyboard not found")??;
         tb_dir.push("mode");
 
-        let mut fd = File::open(tb_dir)?;
+        let mut read_fd = File::open(&tb_dir)?;
         let mut buf = String::new();
-        fd.read_to_string(&mut buf).unwrap();
+        read_fd.read_to_string(&mut buf).unwrap();
+
+        let fd = OpenOptions::new().write(true).read(false).open(tb_dir)?;
 
         let state = match buf.trim() {
             "1" => TouchbarMode::Function,
