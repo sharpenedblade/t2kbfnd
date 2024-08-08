@@ -1,15 +1,15 @@
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use glob::glob;
-use input_linux::{evdev::EvdevHandle, Event, Key};
 use log::{info, trace};
 use simplelog::TermLogger;
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
-    mem::MaybeUninit,
-    time::Instant,
+    sync::Arc,
+    time::{Duration, Instant},
 };
+use tokio::{sync::RwLock, time};
 
 #[derive(Parser)]
 struct Args {
@@ -115,7 +115,8 @@ fn load_config() -> Result<TouchbarMode> {
     Ok(mode)
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     let log_level = match args.debug {
@@ -133,51 +134,59 @@ fn main() -> Result<()> {
 
     let default_mode = load_config().unwrap_or(TouchbarMode::Media);
 
+    let evdev_device = get_keyboard_event_fd()?;
+    let mut events = evdev_device.into_event_stream()?;
+
     let mut touchbar = Touchbar::new(default_mode)?;
     let mut touchbar_backlight = TbBacklight::new()?;
 
-    let evdev_handle = get_keyboard_event_fd()?;
-    let mut ev_buf = [MaybeUninit::uninit(); 8];
-
-    let mut last_event_time = Instant::now();
+    let time_lock = Arc::new(RwLock::new(Instant::now()));
+    let backlight_time_lock = time_lock.clone();
+    let _backlight_task = tokio::task::spawn(async move {
+        let mut interval = time::interval(Duration::from_millis(500));
+        loop {
+            interval.tick().await;
+            let inactive_time = backlight_time_lock.read().await.elapsed().as_secs();
+            if inactive_time >= 60 {
+                touchbar_backlight
+                    .set_brightness(TbBacklightMode::Off)
+                    .unwrap()
+            } else if inactive_time >= 30 {
+                touchbar_backlight
+                    .set_brightness(TbBacklightMode::Dim)
+                    .unwrap()
+            } else {
+                touchbar_backlight
+                    .set_brightness(TbBacklightMode::Max)
+                    .unwrap()
+            }
+        }
+    });
 
     loop {
-        let events = evdev_handle
-            .read_input_events(&mut ev_buf)?
-            .iter()
-            .map(|e| Event::new(*e).unwrap());
-        for event in events {
-            if let Event::Key(key_event) = event {
-                if key_event.key == Key::Fn {
-                    touchbar.set_mode(if key_event.value.is_pressed() {
-                        if touchbar.default_mode == TouchbarMode::Media {
-                            TouchbarMode::Function
-                        } else {
-                            TouchbarMode::Media
-                        }
+        let event = events.next_event().await?;
+        if let evdev::InputEventKind::Key(key) = event.kind() {
+            if key == evdev::Key::KEY_FN {
+                touchbar.set_mode(if event.value() == 0 {
+                    if touchbar.default_mode == TouchbarMode::Media {
+                        TouchbarMode::Function
                     } else {
-                        touchbar.default_mode
-                    })?
-                }
+                        TouchbarMode::Media
+                    }
+                } else {
+                    touchbar.default_mode
+                })?
             }
-            last_event_time = Instant::now();
         }
-
-        let inactive_time = last_event_time.elapsed().as_secs();
-        if inactive_time >= 60 {
-            touchbar_backlight.set_brightness(TbBacklightMode::Off)?
-        } else if inactive_time >= 30 {
-            touchbar_backlight.set_brightness(TbBacklightMode::Dim)?
-        } else {
-            touchbar_backlight.set_brightness(TbBacklightMode::Max)?
-        }
+        let mut event_time = time_lock.write().await;
+        *event_time = Instant::now();
     }
 }
 
-fn get_keyboard_event_fd() -> Result<EvdevHandle<File>> {
+fn get_keyboard_event_fd() -> Result<evdev::Device> {
     let event_path = glob(KEYBOARD_EVENT_PATH)?
         .next()
         .context("Path not found")??;
-    let event_fd = File::open(event_path)?;
-    Ok(EvdevHandle::new(event_fd))
+    let device = evdev::Device::open(event_path)?;
+    Ok(device)
 }
