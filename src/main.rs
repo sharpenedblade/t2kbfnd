@@ -66,6 +66,19 @@ impl Touchbar {
         self.state = mode;
         Ok(())
     }
+
+    fn switch_mode(&mut self, pressed: bool) -> Result<()> {
+        if pressed {
+            self.set_mode(match self.default_mode {
+                TouchbarMode::Esc => TouchbarMode::Esc,
+                TouchbarMode::Function => TouchbarMode::Media,
+                TouchbarMode::Media => TouchbarMode::Function,
+            })?
+        } else {
+            self.set_mode(self.default_mode)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -174,17 +187,8 @@ async fn main() -> Result<()> {
         let event = events.next_event().await?;
         if let evdev::InputEventKind::Key(key) = event.kind() {
             if key == evdev::Key::KEY_FN {
-                touchbar.set_mode(if event.value() == 0 {
-                    fn_pressed = true;
-                    if touchbar.default_mode == TouchbarMode::Media {
-                        TouchbarMode::Function
-                    } else {
-                        TouchbarMode::Media
-                    }
-                } else {
-                    fn_pressed = false;
-                    touchbar.default_mode
-                })?
+                fn_pressed = event.value() == 0;
+                touchbar.switch_mode(fn_pressed)?;
             } else if fn_pressed && key == evdev::Key::KEY_ESC {
                 if touchbar.default_mode == TouchbarMode::Media {
                     touchbar.default_mode = TouchbarMode::Function;
