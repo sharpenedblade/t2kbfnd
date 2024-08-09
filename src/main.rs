@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use glob::glob;
-use log::{info, trace};
+use log::trace;
 use simplelog::TermLogger;
 use std::{
     fs::{File, OpenOptions},
@@ -17,69 +17,8 @@ struct Args {
     debug: u8,
 }
 
-const TOUCHBAR_CONTROL_PATH: &str = "/sys/bus/hid/drivers/hid-appletb-kbd/*05AC:8302*";
 const TOUCHBAR_BACKLIGHT_PATH: &str = "/sys/class/backlight/appletb_backlight/brightness";
 const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-kbd";
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum TouchbarMode {
-    Esc = 0,
-    Function = 1,
-    Media = 2,
-}
-
-struct Touchbar {
-    fd: File,
-    state: TouchbarMode,
-    default_mode: TouchbarMode,
-}
-
-impl Touchbar {
-    fn new(default_mode: TouchbarMode) -> Result<Self> {
-        let mut tb_dir = glob(TOUCHBAR_CONTROL_PATH)?
-            .next()
-            .context("Touchbar not found")??;
-        tb_dir.push("mode");
-        info!("Touchbar found: {}", tb_dir.display());
-
-        let mut read_fd = File::open(&tb_dir)?;
-        let mut buf = String::new();
-        read_fd.read_to_string(&mut buf)?;
-
-        let fd = OpenOptions::new().write(true).read(false).open(tb_dir)?;
-
-        let state = match buf.trim() {
-            "0" => TouchbarMode::Esc,
-            "1" => TouchbarMode::Function,
-            "2" => TouchbarMode::Media,
-            _ => return Err(anyhow!("Touchbar state unknown")),
-        };
-        Ok(Self {
-            default_mode,
-            fd,
-            state,
-        })
-    }
-
-    fn set_mode(&mut self, mode: TouchbarMode) -> Result<()> {
-        self.fd.write_all(format!("{}", mode as u32).as_bytes())?;
-        self.state = mode;
-        Ok(())
-    }
-
-    fn switch_mode(&mut self, pressed: bool) -> Result<()> {
-        if pressed {
-            self.set_mode(match self.default_mode {
-                TouchbarMode::Esc => TouchbarMode::Esc,
-                TouchbarMode::Function => TouchbarMode::Media,
-                TouchbarMode::Media => TouchbarMode::Function,
-            })?
-        } else {
-            self.set_mode(self.default_mode)?;
-        }
-        Ok(())
-    }
-}
 
 #[derive(Debug, Copy, Clone)]
 enum TbBacklightMode {
@@ -120,17 +59,6 @@ impl TbBacklight {
     }
 }
 
-fn load_config() -> Result<TouchbarMode> {
-    let config = std::fs::read_to_string("/etc/t2kbfnd.txt")?;
-    let mode = match config.trim() {
-        "media" => TouchbarMode::Media,
-        "function" => TouchbarMode::Function,
-        _ => return Err(anyhow!("Bad config file")),
-    };
-    info!("Setting default mode to {:#?}", mode);
-    Ok(mode)
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -148,57 +76,39 @@ async fn main() -> Result<()> {
         simplelog::ColorChoice::Auto,
     );
 
-    let default_mode = load_config().unwrap_or(TouchbarMode::Media);
-
     let evdev_device = get_keyboard_event_fd()?;
     let mut events = evdev_device.into_event_stream()?;
 
-    let mut touchbar = Touchbar::new(default_mode)?;
     let mut touchbar_backlight = TbBacklight::new()?;
 
     let time_lock = Arc::new(RwLock::new(Instant::now()));
     let backlight_time_lock = time_lock.clone();
     let _backlight_task = tokio::task::spawn(async move {
-        let mut interval = time::interval(Duration::from_millis(500));
+        let mut interval = time::interval(Duration::from_millis(100));
         let mut failure_counter = 0;
         loop {
             interval.tick().await;
             let inactive_time = backlight_time_lock.read().await.elapsed().as_secs();
-            if inactive_time >= 60 {
-                touchbar_backlight
-                    .set_brightness(TbBacklightMode::Off)
-                    .unwrap_or_else(|_| failure_counter += 1);
-            } else if inactive_time >= 30 {
-                touchbar_backlight
-                    .set_brightness(TbBacklightMode::Dim)
-                    .unwrap_or_else(|_| failure_counter += 1);
-            } else {
-                touchbar_backlight
-                    .set_brightness(TbBacklightMode::Max)
-                    .unwrap_or_else(|_| failure_counter += 1);
-            }
+            touchbar_backlight
+                .set_brightness(if inactive_time >= 60 {
+                    TbBacklightMode::Off
+                } else if inactive_time >= 30 {
+                    TbBacklightMode::Dim
+                } else {
+                    TbBacklightMode::Max
+                })
+                .unwrap_or_else(|_| failure_counter += 1);
             if failure_counter >= 3 {
                 return;
             }
         }
     });
-    let mut fn_pressed = false;
     loop {
         let event = events.next_event().await?;
-        if let evdev::InputEventKind::Key(key) = event.kind() {
-            if key == evdev::Key::KEY_FN {
-                fn_pressed = event.value() == 0;
-                touchbar.switch_mode(fn_pressed)?;
-            } else if fn_pressed && key == evdev::Key::KEY_ESC {
-                if touchbar.default_mode == TouchbarMode::Media {
-                    touchbar.default_mode = TouchbarMode::Function;
-                } else {
-                    touchbar.default_mode = TouchbarMode::Media;
-                }
-            }
+        if let evdev::InputEventKind::Key(_) = event.kind() {
+            let mut event_time = time_lock.write().await;
+            *event_time = Instant::now();
         }
-        let mut event_time = time_lock.write().await;
-        *event_time = Instant::now();
     }
 }
 
