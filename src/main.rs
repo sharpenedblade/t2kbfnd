@@ -169,20 +169,28 @@ async fn main() -> Result<()> {
             }
         }
     });
-
+    let mut fn_pressed = false;
     loop {
         let event = events.next_event().await?;
         if let evdev::InputEventKind::Key(key) = event.kind() {
             if key == evdev::Key::KEY_FN {
                 touchbar.set_mode(if event.value() == 0 {
+                    fn_pressed = true;
                     if touchbar.default_mode == TouchbarMode::Media {
                         TouchbarMode::Function
                     } else {
                         TouchbarMode::Media
                     }
                 } else {
+                    fn_pressed = false;
                     touchbar.default_mode
                 })?
+            } else if fn_pressed && key == evdev::Key::KEY_ESC {
+                if touchbar.default_mode == TouchbarMode::Media {
+                    touchbar.default_mode = TouchbarMode::Function;
+                } else {
+                    touchbar.default_mode = TouchbarMode::Media;
+                }
             }
         }
         let mut event_time = time_lock.write().await;
