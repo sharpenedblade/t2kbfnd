@@ -18,6 +18,7 @@ struct Args {
 }
 
 const TOUCHBAR_CONTROL_PATH: &str = "/sys/bus/hid/drivers/hid-appletb-kbd/*05AC:8302*";
+const TOUCHBAR_BACKLIGHT_PATH: &str = "/sys/class/backlight/appletb_backlight/brightness";
 const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-kbd";
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -81,14 +82,14 @@ struct TbBacklight {
 
 impl TbBacklight {
     fn new() -> Result<Self> {
-        let mut read_fd = File::open("/sys/class/backlight/appletb_backlight/brightness")?;
+        let mut read_fd = File::open(TOUCHBAR_BACKLIGHT_PATH)?;
         let mut buf = String::new();
         read_fd.read_to_string(&mut buf)?;
 
         let fd = OpenOptions::new()
             .write(true)
             .read(false)
-            .open("/sys/class/backlight/appletb_backlight/brightness")?;
+            .open(TOUCHBAR_BACKLIGHT_PATH)?;
         let state = match buf.trim() {
             "0" => TbBacklightMode::Off,
             "1" => TbBacklightMode::Dim,
@@ -146,21 +147,25 @@ async fn main() -> Result<()> {
     let backlight_time_lock = time_lock.clone();
     let _backlight_task = tokio::task::spawn(async move {
         let mut interval = time::interval(Duration::from_millis(500));
+        let mut failure_counter = 0;
         loop {
             interval.tick().await;
             let inactive_time = backlight_time_lock.read().await.elapsed().as_secs();
             if inactive_time >= 60 {
                 touchbar_backlight
                     .set_brightness(TbBacklightMode::Off)
-                    .unwrap()
+                    .unwrap_or_else(|_| failure_counter += 1);
             } else if inactive_time >= 30 {
                 touchbar_backlight
                     .set_brightness(TbBacklightMode::Dim)
-                    .unwrap()
+                    .unwrap_or_else(|_| failure_counter += 1);
             } else {
                 touchbar_backlight
                     .set_brightness(TbBacklightMode::Max)
-                    .unwrap()
+                    .unwrap_or_else(|_| failure_counter += 1);
+            }
+            if failure_counter >= 3 {
+                return;
             }
         }
     });
