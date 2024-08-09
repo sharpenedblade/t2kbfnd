@@ -19,8 +19,9 @@ struct Args {
 
 const TOUCHBAR_BACKLIGHT_PATH: &str = "/sys/class/backlight/appletb_backlight/brightness";
 const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-kbd";
+const TRACKPAD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-kbd";
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum TbBacklightMode {
     Off = 0,
     Dim = 1,
@@ -52,9 +53,11 @@ impl TbBacklight {
     }
 
     fn set_brightness(&mut self, mode: TbBacklightMode) -> Result<()> {
-        trace!("Setting brightness to {}", mode as u32);
-        self.fd.write_all(format!("{}", mode as u32).as_bytes())?;
-        self.state = mode;
+        if self.state != mode {
+            trace!("Setting brightness to {}", mode as u32);
+            self.fd.write_all(format!("{}", mode as u32).as_bytes())?;
+            self.state = mode;
+        }
         Ok(())
     }
 }
@@ -76,12 +79,9 @@ async fn main() -> Result<()> {
         simplelog::ColorChoice::Auto,
     );
 
-    let evdev_device = get_keyboard_event_fd()?;
-    let mut events = evdev_device.into_event_stream()?;
+    let time_lock = Arc::new(RwLock::new(Instant::now()));
 
     let mut touchbar_backlight = TbBacklight::new()?;
-
-    let time_lock = Arc::new(RwLock::new(Instant::now()));
     let backlight_time_lock = time_lock.clone();
     let _backlight_task = tokio::task::spawn(async move {
         let mut interval = time::interval(Duration::from_millis(100));
@@ -103,19 +103,31 @@ async fn main() -> Result<()> {
             }
         }
     });
-    loop {
-        let event = events.next_event().await?;
-        if let evdev::InputEventKind::Key(_) = event.kind() {
+
+    let keyboard_events = get_event_fd(KEYBOARD_EVENT_PATH)?.into_event_stream()?;
+    let _keyboard_event_task = create_event_moniter(keyboard_events, time_lock.clone());
+
+    let trackpad_events = get_event_fd(TRACKPAD_EVENT_PATH)?.into_event_stream()?;
+    let _trackpad_event_task = create_event_moniter(trackpad_events, time_lock.clone());
+
+    Ok(())
+}
+
+fn create_event_moniter(
+    mut events: evdev::EventStream,
+    time_lock: Arc<RwLock<Instant>>,
+) -> tokio::task::JoinHandle<Result<()>> {
+    tokio::task::spawn(async move {
+        loop {
+            let _event = events.next_event().await.unwrap();
             let mut event_time = time_lock.write().await;
             *event_time = Instant::now();
         }
-    }
+    })
 }
 
-fn get_keyboard_event_fd() -> Result<evdev::Device> {
-    let event_path = glob(KEYBOARD_EVENT_PATH)?
-        .next()
-        .context("Path not found")??;
+fn get_event_fd(p: &str) -> Result<evdev::Device> {
+    let event_path = glob(p)?.next().context("Path not found")??;
     let device = evdev::Device::open(event_path)?;
     Ok(device)
 }
