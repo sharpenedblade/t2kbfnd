@@ -22,6 +22,7 @@ const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*eve
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum TouchbarMode {
+    Esc = 0,
     Function = 1,
     Media = 2,
 }
@@ -47,6 +48,7 @@ impl Touchbar {
         let fd = OpenOptions::new().write(true).read(false).open(tb_dir)?;
 
         let state = match buf.trim() {
+            "0" => TouchbarMode::Esc,
             "1" => TouchbarMode::Function,
             "2" => TouchbarMode::Media,
             _ => return Err(anyhow!("Touchbar state unknown")),
