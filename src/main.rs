@@ -19,7 +19,7 @@ struct Args {
 
 const TOUCHBAR_BACKLIGHT_PATH: &str = "/sys/class/backlight/appletb_backlight/brightness";
 const KEYBOARD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-kbd";
-const TRACKPAD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-kbd";
+const TRACKPAD_EVENT_PATH: &str = "/dev/input/by-id/*Apple_Internal_Keyboard*event-mouse";
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum TbBacklightMode {
